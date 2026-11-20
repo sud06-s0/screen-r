@@ -1,0 +1,15 @@
+{
+  "name": "screen-r",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Darkroom — browser screen recorder (tab, window or entire screen). Runs fully client-side.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}
