@@ -3,9 +3,9 @@
 // so it runs fine on PCs without a dedicated GPU.
 
 export const PRESETS = {
-  light:    { w: 1280, h: 720,  fps: 24, vbr: 2_500_000, codec: 'vp8'  },
-  balanced: { w: 1920, h: 1080, fps: 30, vbr: 5_000_000, codec: 'auto' },
-  high:     { w: 1920, h: 1080, fps: 60, vbr: 8_000_000, codec: 'auto' }
+  light:    { w: 1280, h: 720,  fps: 24, vbr: 3_000_000, codec: 'vp8'  },
+  balanced: { w: 1920, h: 1080, fps: 30, vbr: 6_000_000, codec: 'auto' },
+  high:     { w: 1920, h: 1080, fps: 60, vbr: 9_000_000, codec: 'auto' }
 };
 
 // Ordered by preference. H.264 first: integrated GPUs (Intel Quick Sync, AMD VCE)
@@ -26,8 +26,36 @@ const MIME_LISTS = {
 export const isSupported = () =>
   !!(navigator.mediaDevices?.getDisplayMedia && window.MediaRecorder);
 
-function pickMime(codec) {
-  return MIME_LISTS[codec].find(m => MediaRecorder.isTypeSupported(m)) || '';
+/**
+ * Picks the codec that puts the least load on this PC.
+ * 1. Any supported format the browser says it can encode "power-efficiently"
+ *    (= hardware encoder on the integrated/dedicated GPU) wins.
+ * 2. Otherwise Light uses VP8 (cheapest software codec), others the first supported.
+ */
+async function pickMime(preset) {
+  const supported = MIME_LISTS.auto.filter(m => MediaRecorder.isTypeSupported(m));
+
+  if (navigator.mediaCapabilities?.encodingInfo) {
+    for (const m of supported) {
+      if (!m.includes('codecs=')) continue;
+      try {
+        const info = await navigator.mediaCapabilities.encodingInfo({
+          type: 'record',
+          video: {
+            contentType: m.replace(/,(opus|mp4a\.40\.2)$/, ''),
+            width: preset.w, height: preset.h,
+            bitrate: preset.vbr, framerate: preset.fps
+          }
+        });
+        if (info.supported && info.powerEfficient) return { mime: m, hardware: true };
+      } catch { /* not answerable for this type; try the next */ }
+    }
+  }
+
+  const fallback = preset.codec === 'vp8'
+    ? MIME_LISTS.vp8.find(m => MediaRecorder.isTypeSupported(m))
+    : supported[0];
+  return { mime: fallback || '', hardware: false };
 }
 
 export class ScreenRecorder {
@@ -43,6 +71,7 @@ export class ScreenRecorder {
     this.bytes = 0;
     this.mime = '';
     this.lastSettings = null;
+    this.hardware = false;
   }
 
   get state() { return this.recorder ? this.recorder.state : 'inactive'; }
@@ -99,7 +128,13 @@ export class ScreenRecorder {
 
     const stream = new MediaStream([...this.display.getVideoTracks(), ...this.#mixAudio()]);
 
-    const wanted = pickMime(p.codec);
+    // Tell the encoder what it's encoding: screen text stays sharp ('detail');
+    // 60fps favours smooth movement ('motion').
+    const vTrack = this.display.getVideoTracks()[0];
+    if ('contentHint' in vTrack) vTrack.contentHint = p.fps >= 60 ? 'motion' : 'detail';
+
+    const { mime: wanted, hardware } = await pickMime(p);
+    this.hardware = hardware;
     try {
       this.recorder = new MediaRecorder(stream, {
         ...(wanted && { mimeType: wanted }),

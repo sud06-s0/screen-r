@@ -10,8 +10,12 @@ const els = {
   msg: $('#msg'), badge: $('#badge'),
   start: $('#startBtn'), pause: $('#pauseBtn'), stop: $('#stopBtn'),
   download: $('#downloadBtn'), newRec: $('#newBtn'),
-  sysAudio: $('#sysAudio'), mic: $('#mic')
+  sysAudio: $('#sysAudio'), mic: $('#mic'), livePreview: $('#livePreview'),
+  emptyTitle: $('#emptyTitle'), emptySub: $('#emptySub')
 };
+
+const IDLE_TEXT = { title: els.emptyTitle.textContent, sub: els.emptySub.textContent };
+let liveStream = null;
 
 const settings = { source: 'monitor', preset: 'balanced' };
 let elapsed = 0, lastTick = 0, tickId = null, blobUrl = null;
@@ -50,7 +54,30 @@ function setMode(mode) {
   els.pause.querySelector('span').textContent = mode === 'paused' ? 'Resume' : 'Pause';
   els.badge.textContent = mode === 'paused' ? '❚❚ PAUSED' : '● REC';
   document.querySelectorAll('#settings button, #settings input')
-    .forEach(el => { el.disabled = mode !== 'idle'; });
+    .forEach(el => { el.disabled = mode !== 'idle' && el !== els.livePreview; });
+}
+
+function setEmpty(title, sub) {
+  els.emptyTitle.textContent = title;
+  els.emptySub.textContent = sub;
+}
+
+/** Shows or hides the live preview while recording. Hidden = no redraw cost. */
+function applyLivePreview() {
+  const v = els.video;
+  if (!liveStream) return;
+  if (els.livePreview.checked) {
+    v.srcObject = liveStream;
+    v.muted = true;
+    v.controls = false;
+    v.play().catch(() => {});
+    els.screen.classList.add('has-video');
+  } else {
+    v.pause();
+    v.srcObject = null;
+    els.screen.classList.remove('has-video');
+    setEmpty('Recording…', 'Live preview is off to keep your PC light. Stop to save the file.');
+  }
 }
 
 function tick() {
@@ -64,7 +91,8 @@ function updateMeta(extra) {
   const p = PRESETS[settings.preset];
   const s = rec.videoSettings;
   const res = s.width ? `${s.width}×${s.height}` : `${p.w}×${p.h}`;
-  els.meta.innerHTML = `${res} · ${p.fps}fps · ${codecLabel(rec.mime)}<br>${fmtSize(rec.bytes)}${extra ? ' · ' + extra : ''}`;
+  const enc = rec.hardware ? 'GPU encode' : 'CPU encode';
+  els.meta.innerHTML = `${res} · ${p.fps}fps · ${codecLabel(rec.mime)} · ${enc}<br>${fmtSize(rec.bytes)}${extra ? ' · ' + extra : ''}`;
 }
 
 // ---------- actions ----------
@@ -84,11 +112,8 @@ async function start() {
     return;
   }
 
-  els.video.srcObject = display;
-  els.video.muted = true;
-  els.video.controls = false;
-  els.video.play().catch(() => {});
-  els.screen.classList.add('has-video');
+  liveStream = display;
+  applyLivePreview();
 
   elapsed = 0;
   lastTick = performance.now();
@@ -111,6 +136,7 @@ function stop() {
 function showResult({ blob, ext }) {
   clearInterval(tickId);
   tickId = null;
+  liveStream = null;
 
   if (blobUrl) URL.revokeObjectURL(blobUrl);
   blobUrl = URL.createObjectURL(blob);
@@ -123,6 +149,7 @@ function showResult({ blob, ext }) {
   v.src = blobUrl;
   v.muted = false;
   v.controls = true;
+  els.screen.classList.add('has-video');
 
   // WebM from MediaRecorder has no duration header; this nudge fixes the preview seek bar.
   if (ext === 'webm') {
@@ -135,7 +162,10 @@ function showResult({ blob, ext }) {
 
   setMode('done');
   updateMeta(ext.toUpperCase());
-  say('Done. Preview it above, then download.');
+
+  // Auto-save to the PC's Downloads folder. The button stays for a second copy.
+  els.download.click();
+  say(`Saved as ${els.download.download} in your Downloads folder.`);
 }
 
 function reset() {
@@ -143,6 +173,7 @@ function reset() {
   els.video.removeAttribute('src');
   els.video.load();
   els.screen.classList.remove('has-video');
+  setEmpty(IDLE_TEXT.title, IDLE_TEXT.sub);
   elapsed = 0;
   els.clock.textContent = '00:00:00';
   els.meta.textContent = 'idle';
@@ -158,6 +189,7 @@ els.start.addEventListener('click', start);
 els.pause.addEventListener('click', togglePause);
 els.stop.addEventListener('click', stop);
 els.newRec.addEventListener('click', reset);
+els.livePreview.addEventListener('change', applyLivePreview);
 
 window.addEventListener('beforeunload', e => {
   if (rec.state !== 'inactive') { e.preventDefault(); e.returnValue = ''; }

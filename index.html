@@ -47,7 +47,13 @@
             <button type="button" data-v="balanced" aria-pressed="true">Smooth<small>1080p·30</small></button>
             <button type="button" data-v="high" aria-pressed="false">Sharp<small>1080p·60</small></button>
           </div>
-          <p class="hint">Use <b>Light</b> on older or low-end PCs. It uses much less CPU.</p>
+          <p class="hint"><b>Smooth</b> suits most PCs. Use <b>Light</b> on older ones. <b>Sharp</b> (60fps) costs the most.</p>
+        </div>
+
+        <div class="group">
+          <p class="label">While recording</p>
+          <label class="toggle">Live preview <input type="checkbox" id="livePreview"></label>
+          <p class="hint">Off saves CPU. Your screen isn't redrawn inside the app while recording.</p>
         </div>
 
         <div class="group">
@@ -64,8 +70,8 @@
           <span class="corner c3"></span><span class="corner c4"></span>
           <div class="badge" id="badge">● REC</div>
           <div class="empty">
-            <div class="big">Ready when you are</div>
-            <div>Pick what to record, then hit Record.</div>
+            <div class="big" id="emptyTitle">Ready when you are</div>
+            <div id="emptySub">Pick what to record, then hit Record. The file downloads automatically when you stop.</div>
           </div>
           <video id="video" playsinline></video>
         </div>
