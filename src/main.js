@@ -138,6 +138,12 @@ function showResult({ blob, ext }) {
   tickId = null;
   liveStream = null;
 
+  if (!blob.size) {
+    reset();
+    say('Nothing was captured. Try the Light preset, or use Chrome/Edge.', true);
+    return;
+  }
+
   if (blobUrl) URL.revokeObjectURL(blobUrl);
   blobUrl = URL.createObjectURL(blob);
 

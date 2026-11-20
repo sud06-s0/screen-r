@@ -127,6 +127,7 @@ export class ScreenRecorder {
     }
 
     const stream = new MediaStream([...this.display.getVideoTracks(), ...this.#mixAudio()]);
+    const hasAudio = stream.getAudioTracks().length > 0;
 
     // Tell the encoder what it's encoding: screen text stays sharp ('detail');
     // 60fps favours smooth movement ('motion').
@@ -135,39 +136,86 @@ export class ScreenRecorder {
 
     const { mime: wanted, hardware } = await pickMime(p);
     this.hardware = hardware;
+    this.preset = p;
+    this.stream = stream;
+    this.chunks = [];
+    this.bytes = 0;
+    this.finished = false;
+    this.fellBack = false;
+
     try {
-      this.recorder = new MediaRecorder(stream, {
-        ...(wanted && { mimeType: wanted }),
-        videoBitsPerSecond: p.vbr,
-        audioBitsPerSecond: 128_000
-      });
+      // Don't name an audio codec when there's no audio track: some browsers
+      // (Firefox) refuse to encode on a codec/track mismatch.
+      this.#startRecorder(hasAudio ? wanted : videoOnly(wanted));
     } catch (e) {
       this.#release();
       throw e;
     }
-    this.mime = this.recorder.mimeType || wanted || 'video/webm';
-
-    this.chunks = [];
-    this.bytes = 0;
-    this.recorder.ondataavailable = e => {
-      if (e.data?.size) {
-        this.chunks.push(e.data);
-        this.bytes += e.data.size;
-        this.onData(this.bytes);
-      }
-    };
-    this.recorder.onstop = () => this.#finish();
 
     // User pressed the browser's own "Stop sharing" bar.
-    this.display.getVideoTracks()[0].addEventListener('ended', () => this.stop());
+    vTrack.addEventListener('ended', () => this.stop());
 
-    this.recorder.start(1000);
     return this.display;
   }
 
   pause()  { if (this.state === 'recording') this.recorder.pause(); }
   resume() { if (this.state === 'paused') this.recorder.resume(); }
-  stop()   { if (this.state !== 'inactive') this.recorder.stop(); }
+
+  /** Always ends the session, even if the encoder already died. */
+  stop() {
+    if (this.finished) return;
+    if (this.state !== 'inactive') {
+      this.recorder.stop();
+      // Safety net: if the browser never fires 'stop', save what we have.
+      clearTimeout(this.stopTimer);
+      this.stopTimer = setTimeout(() => this.#finish(), 4000);
+    } else {
+      this.#finish();
+    }
+  }
+
+  #startRecorder(mime) {
+    const rec = new MediaRecorder(this.stream, {
+      ...(mime && { mimeType: mime }),
+      videoBitsPerSecond: this.preset.vbr,
+      audioBitsPerSecond: 128_000
+    });
+    this.recorder = rec;
+    this.mime = rec.mimeType || mime || 'video/webm';
+
+    rec.ondataavailable = e => {
+      if (rec !== this.recorder || !e.data?.size) return;
+      this.chunks.push(e.data);
+      this.bytes += e.data.size;
+      this.onData(this.bytes);
+    };
+    rec.onstop = () => { if (rec === this.recorder) this.#finish(); };
+    rec.onerror = e => this.#onEncoderError(rec, e.error || e);
+
+    rec.start(1000);
+  }
+
+  /** Encoder crashed (common with some hardware encoders). Recover instead of hanging. */
+  #onEncoderError(rec, err) {
+    if (rec !== this.recorder || this.finished) return;
+    const reason = err?.message || err?.name || 'encoder error';
+
+    // Nothing recorded yet: silently switch to the safe software codec and carry on.
+    if (this.bytes === 0 && !this.fellBack) {
+      this.fellBack = true;
+      this.hardware = false;
+      const hasAudio = this.stream.getAudioTracks().length > 0;
+      const safe = MIME_LISTS.vp8.find(m => MediaRecorder.isTypeSupported(m)) || '';
+      try {
+        this.#startRecorder(hasAudio ? safe : videoOnly(safe));
+        this.onWarn('Hardware encoder failed, so it switched to the safe encoder and is still recording.');
+        return;
+      } catch { /* fall through and save what we have */ }
+    }
+
+    this.onWarn(`Recording stopped unexpectedly (${reason}). Saving what was captured.`);
+    this.#finish();
+  }
 
   /** Returns one audio track: system, mic, or both mixed. */
   #mixAudio() {
@@ -184,14 +232,25 @@ export class ScreenRecorder {
   #release() {
     [this.display, this.mic].forEach(s => s?.getTracks().forEach(t => t.stop()));
     this.audioCtx?.close().catch(() => {});
-    this.display = this.mic = this.audioCtx = null;
+    this.display = this.mic = this.audioCtx = this.stream = null;
   }
 
   #finish() {
+    if (this.finished) return;
+    this.finished = true;
+    clearTimeout(this.stopTimer);
+    if (this.recorder && this.recorder.state !== 'inactive') {
+      try { this.recorder.stop(); } catch { /* already dead */ }
+    }
+    this.recorder = null;
     this.#release();
     const blob = new Blob(this.chunks, { type: this.mime });
     this.chunks = [];
     const ext = this.mime.includes('mp4') ? 'mp4' : 'webm';
     this.onStop({ blob, ext, mime: this.mime });
   }
+}
+
+function videoOnly(mime) {
+  return (mime || '').replace(/,\s*(opus|mp4a\.40\.2)$/, '');
 }
