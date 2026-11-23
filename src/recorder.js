@@ -83,7 +83,7 @@ export class ScreenRecorder {
   }
 
   /** Opens the picker and starts recording. Throws on cancel/failure. */
-  async start({ source, preset, systemAudio, microphone }) {
+  async start({ source, preset, systemAudio, microphone, onPickerShown }) {
     const p = PRESETS[preset];
 
     const request = withAudio => navigator.mediaDevices.getDisplayMedia({
@@ -101,13 +101,19 @@ export class ScreenRecorder {
       systemAudio: withAudio ? 'include' : 'exclude'
     });
 
+    // The picker must be requested synchronously inside the click (browsers require
+    // a fresh user gesture). Anything else that needs the gesture runs right after.
+    const picking = request(systemAudio);
+    try { onPickerShown?.(); } catch { /* optional extra, never blocks recording */ }
+
     let audioFellBack = false;
     try {
-      this.display = await request(systemAudio);
+      this.display = await picking;
     } catch (e) {
       audioFellBack = true;
       // Some PCs fail to open the system audio device; record video-only rather than nothing.
-      if (!systemAudio || e.name === 'NotAllowedError') throw e;
+      // (A gesture/permission error can't be retried: the click is used up.)
+      if (!systemAudio || e.name === 'NotAllowedError' || e.name === 'InvalidStateError') throw e;
       this.display = await request(false);
       this.onWarn("System sound couldn't be captured on this PC, so recording continues without it.");
     }

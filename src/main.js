@@ -73,11 +73,14 @@ function syncMini() {
 async function showMini({ quiet = false } = {}) {
   if (mini) return;
   try {
-    mini = await openMini({
+    const opened = await openMini({
       onToggle: togglePause,
       onStop: stop,
       onClosed: () => { mini = null; syncMini(); }
     });
+    // Picker was cancelled or recording already ended while this window was opening.
+    if (rec.state === 'inactive' && !picking) { opened.close(); return; }
+    mini = opened;
   } catch {
     mini = null;
     if (!quiet) say("Couldn't open floating controls. Allow pop-ups for this site and try again.", true);
@@ -131,26 +134,33 @@ function updateMeta(extra) {
 }
 
 // ---------- actions ----------
+let picking = false;   // true while the screen picker is open
+
 async function start() {
   say('');
-  // Chrome/Edge: open the always-on-top controls now, while this click still counts.
-  if (els.floatCtl.checked && hasPiP()) await showMini({ quiet: true });
-
+  picking = true;
   let display;
   try {
     display = await rec.start({
       source: settings.source,
       preset: settings.preset,
       systemAudio: els.sysAudio.checked,
-      microphone: els.mic.checked
+      microphone: els.mic.checked,
+      // Picker is already requested; now try the always-on-top controls (Chrome/Edge).
+      // If the browser won't allow both from one click, the "Pop out controls" button shows instead.
+      onPickerShown: () => {
+        if (els.floatCtl.checked && hasPiP()) showMini({ quiet: true });
+      }
     });
   } catch (e) {
+    picking = false;
     if (e.name === 'NotAllowedError') say('Sharing was cancelled.');
     else say('Could not start recording: ' + e.message, true);
     closeMini();
     return;
   }
 
+  picking = false;
   liveStream = display;
   applyLivePreview();
 
