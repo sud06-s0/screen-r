@@ -18,6 +18,7 @@ const els = {
 const IDLE_TEXT = { title: els.emptyTitle.textContent, sub: els.emptySub.textContent };
 let liveStream = null;
 let mini = null;          // floating controls window
+const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
 let mode = 'idle';
 
 const settings = { source: 'monitor', preset: 'balanced' };
@@ -70,8 +71,11 @@ function syncMini() {
 }
 
 /** Opens the floating Pause/Resume/Stop window. Needs a click (user activation). */
+let miniOpening = false;
+
 async function showMini({ quiet = false } = {}) {
-  if (mini) return;
+  if (mini || miniOpening) return;
+  miniOpening = true;
   try {
     const opened = await openMini({
       onToggle: togglePause,
@@ -84,6 +88,8 @@ async function showMini({ quiet = false } = {}) {
   } catch {
     mini = null;
     if (!quiet) say("Couldn't open floating controls. Allow pop-ups for this site and try again.", true);
+  } finally {
+    miniOpening = false;
   }
   syncMini();
 }
@@ -146,10 +152,11 @@ async function start() {
       preset: settings.preset,
       systemAudio: els.sysAudio.checked,
       microphone: els.mic.checked,
-      // Picker is already requested; now try the always-on-top controls (Chrome/Edge).
-      // If the browser won't allow both from one click, the "Pop out controls" button shows instead.
+      // Picker is already requested; on Chrome/Edge also open the always-on-top controls
+      // from the same click. Firefox's picker breaks if a window opens while it's up
+      // (empty list, previews the floating window), so there it waits until recording starts.
       onPickerShown: () => {
-        if (els.floatCtl.checked && hasPiP()) showMini({ quiet: true });
+        if (els.floatCtl.checked && hasPiP() && !IS_FIREFOX) showMini({ quiet: true });
       }
     });
   } catch (e) {
@@ -163,6 +170,10 @@ async function start() {
   picking = false;
   liveStream = display;
   applyLivePreview();
+
+  // Not opened yet (Firefox, or the browser refused): try once more quietly.
+  // If that's refused too, the "Pop out controls" button is shown.
+  if (els.floatCtl.checked && hasPiP() && !mini) showMini({ quiet: true });
 
   elapsed = 0;
   lastTick = performance.now();
