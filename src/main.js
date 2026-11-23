@@ -2,6 +2,7 @@
 import './style.css';
 import { ScreenRecorder, PRESETS, isSupported } from './recorder.js';
 import { fmtTime, fmtSize, codecLabel, fileName } from './utils.js';
+import { openMini, hasPiP } from './mini.js';
 
 const $ = s => document.querySelector(s);
 
@@ -9,13 +10,15 @@ const els = {
   video: $('#video'), screen: $('#screen'), clock: $('#clock'), meta: $('#meta'),
   msg: $('#msg'), badge: $('#badge'),
   start: $('#startBtn'), pause: $('#pauseBtn'), stop: $('#stopBtn'),
-  download: $('#downloadBtn'), newRec: $('#newBtn'),
+  download: $('#downloadBtn'), newRec: $('#newBtn'), pop: $('#popBtn'), floatCtl: $('#floatCtl'),
   sysAudio: $('#sysAudio'), mic: $('#mic'), livePreview: $('#livePreview'),
   emptyTitle: $('#emptyTitle'), emptySub: $('#emptySub')
 };
 
 const IDLE_TEXT = { title: els.emptyTitle.textContent, sub: els.emptySub.textContent };
 let liveStream = null;
+let mini = null;          // floating controls window
+let mode = 'idle';
 
 const settings = { source: 'monitor', preset: 'balanced' };
 let elapsed = 0, lastTick = 0, tickId = null, blobUrl = null;
@@ -42,7 +45,8 @@ function bindSeg(selector, key) {
   });
 }
 
-function setMode(mode) {
+function setMode(next) {
+  mode = next;
   const live = mode === 'rec' || mode === 'paused';
   document.body.classList.toggle('rec', mode === 'rec');
   document.body.classList.toggle('paused', mode === 'paused');
@@ -55,6 +59,36 @@ function setMode(mode) {
   els.badge.textContent = mode === 'paused' ? '❚❚ PAUSED' : '● REC';
   document.querySelectorAll('#settings button, #settings input')
     .forEach(el => { el.disabled = mode !== 'idle' && el !== els.livePreview; });
+  syncMini();
+}
+
+// ---------- floating controls ----------
+function syncMini() {
+  const live = mode === 'rec' || mode === 'paused';
+  els.pop.hidden = !live || !!mini;
+  mini?.update(mode, els.clock.textContent);
+}
+
+/** Opens the floating Pause/Resume/Stop window. Needs a click (user activation). */
+async function showMini({ quiet = false } = {}) {
+  if (mini) return;
+  try {
+    mini = await openMini({
+      onToggle: togglePause,
+      onStop: stop,
+      onClosed: () => { mini = null; syncMini(); }
+    });
+  } catch {
+    mini = null;
+    if (!quiet) say("Couldn't open floating controls. Allow pop-ups for this site and try again.", true);
+  }
+  syncMini();
+}
+
+function closeMini() {
+  mini?.close();
+  mini = null;
+  syncMini();
 }
 
 function setEmpty(title, sub) {
@@ -85,6 +119,7 @@ function tick() {
   if (rec.state === 'recording') elapsed += now - lastTick;
   lastTick = now;
   els.clock.textContent = fmtTime(elapsed);
+  mini?.update(mode, els.clock.textContent);
 }
 
 function updateMeta(extra) {
@@ -98,6 +133,9 @@ function updateMeta(extra) {
 // ---------- actions ----------
 async function start() {
   say('');
+  // Chrome/Edge: open the always-on-top controls now, while this click still counts.
+  if (els.floatCtl.checked && hasPiP()) await showMini({ quiet: true });
+
   let display;
   try {
     display = await rec.start({
@@ -109,6 +147,7 @@ async function start() {
   } catch (e) {
     if (e.name === 'NotAllowedError') say('Sharing was cancelled.');
     else say('Could not start recording: ' + e.message, true);
+    closeMini();
     return;
   }
 
@@ -137,6 +176,7 @@ function showResult({ blob, ext }) {
   clearInterval(tickId);
   tickId = null;
   liveStream = null;
+  closeMini();
 
   if (!blob.size) {
     reset();
@@ -195,6 +235,7 @@ els.start.addEventListener('click', start);
 els.pause.addEventListener('click', togglePause);
 els.stop.addEventListener('click', stop);
 els.newRec.addEventListener('click', reset);
+els.pop.addEventListener('click', () => showMini());
 els.livePreview.addEventListener('change', applyLivePreview);
 
 window.addEventListener('beforeunload', e => {

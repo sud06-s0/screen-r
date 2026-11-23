@@ -52,8 +52,9 @@
 
         <div class="group">
           <p class="label">While recording</p>
+          <label class="toggle">Floating controls <input type="checkbox" id="floatCtl" checked></label>
           <label class="toggle">Live preview <input type="checkbox" id="livePreview"></label>
-          <p class="hint">Off saves CPU. Your screen isn't redrawn inside the app while recording.</p>
+          <p class="hint">Floating controls keep Pause, Resume and Stop on top while you work in other windows. Live preview off saves CPU.</p>
         </div>
 
         <div class="group">
@@ -83,6 +84,9 @@
 
           <button type="button" class="btn rec" id="startBtn">
             <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="currentColor"/></svg>Record
+          </button>
+          <button type="button" class="btn" id="popBtn" hidden>
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><rect x="8" y="8" width="5" height="4" rx=".8" fill="currentColor"/></svg>Pop out controls
           </button>
           <button type="button" class="btn" id="pauseBtn" hidden>
             <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect x="3" y="2" width="3.5" height="12" rx="1"/><rect x="9.5" y="2" width="3.5" height="12" rx="1"/></svg><span>Pause</span>
